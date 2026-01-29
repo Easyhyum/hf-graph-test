@@ -1,6 +1,7 @@
 import transformers
 import datasets
 import torch
+import json
 from typing import Iterable, List
 from tqdm.auto import tqdm
 
@@ -84,25 +85,63 @@ def main():
         print(f"  Warning: pad_token was None, set to eos_token ({tokenizer.eos_token})")
 
     batch_list = [4]
+    cuda_graphs = {}
+
     # batch_list = [1,2,4,8,16,32]
     # batch_list = [b for b in range(1, 17, 1)]
     for batch_size in batch_list:
-        # warmup and graph capture
-        for _ in range(2):
-            original_padding_side = tokenizer.padding_side
-            tokenizer.padding_side = 'left'
-            inputs = tokenizer(prompts[:batch_size], return_tensors="pt", padding=True, pad_token_id=pad_token_id).to(device)
-            tokenizer.padding_side = original_padding_side
-            
-            print(inputs)
+        past_kv_values = None
+        original_padding_side = tokenizer.padding_side
+        tokenizer.padding_side = 'left'
+        inputs = tokenizer(prompts[:batch_size], return_tensors="pt", padding=True).to(device)
+        tokenizer.padding_side = original_padding_side
+        
+        print(inputs)
+        
+        with torch.no_grad():
+            prefill_outputs = model(
+                input_ids=inputs["input_ids"],
+                attention_mask=inputs["attention_mask"],
+                use_cache=True,
+                return_dict=True,
+            )
+        torch.cuda.synchronize()
 
-            # with torch.no_grad():
-            #     outputs = model(
-            #         input_ids=inputs["input_ids"],
-            #         attention_mask=inputs["attention_mask"],
-            #         use_cache=True,
-            #         return_dict=True,
-            #     )
+        # Pick next token from prefill logits
+        next_token_logits = prefill_outputs.logits[:, -1, :]
+        next_token_ids = torch.argmax(next_token_logits, dim=-1, keepdim=True)
+
+        past_key_values = prefill_outputs.past_key_values
+
+        # 2) 첫 Decoding Warmup
+        attn_mask_dec = torch.cat(
+            [inputs["attention_mask"], torch.ones((inputs["attention_mask"].size(0), 1), device=inputs["attention_mask"].device, dtype=inputs["attention_mask"].dtype)],
+            dim=-1,
+        )
+
+        for _ in range(2):
+            with torch.no_grad():
+                _ = model(
+                    input_ids=next_token_ids,
+                    attention_mask=attn_mask_dec,
+                    past_key_values=past_key_values,
+                    use_cache=True,
+                    return_dict=True,
+                )
+        torch.cuda.synchronize()
+
+        graph = torch.cuda.CUDAGraph(keep_graph=True)
+        with torch.cuda.graph(graph):
+            with torch.no_grad():
+                _ = model(
+                    input_ids=inputs["input_ids"],
+                    attention_mask=inputs["attention_mask"],
+                    past_key_values = past_key_values,
+                    use_cache=True,
+                    return_dict=True,
+                )
+        cuda_graphs[batch_size] = graph
+        # print(f"Captured CUDA graph for batch size {batch_size}")
 
 
 if __name__ == "__main__":
