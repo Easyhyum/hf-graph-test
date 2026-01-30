@@ -11,6 +11,8 @@ import pynvml
 
 from gpu_profile import GPUMonitor
 
+import cuda_graph_api
+
 clock_changed = False
 
 def set_specific_clock(handle, TARGET_MEM_CLOCK = 9001, TARGET_SM_CLOCK = 2460, device_index=0):
@@ -406,12 +408,17 @@ def main(manipulation: bool = False):
     # batch_list = [4]
     test_case = {}
 
-    # batch_list = [1,2,4,8,16,32]
+    # batch_list = [8, 5]
+    # batch_list = [32,16,8,4,2,1]
     batch_list = [32]
     extend_batch_list = [b for b in range(16, 0, -1)]
     batch_list.extend(extend_batch_list)
 
+    # graph_batch_list = [8]
     graph_batch_list = [32,16,8,4,2,1]
+    # graph_batch_list = [32]
+    # extend_batch_list = [b for b in range(16, 0, -1)]
+    # graph_batch_list.extend(extend_batch_list)
 
     outputs_idx = None
     mask = None
@@ -554,10 +561,12 @@ def main(manipulation: bool = False):
                 'cache_position': static_cache_position,
                 'past_key_values': static_past_key_values,
             }
+            test_case[batch_size]['manipulated'] = False
+            test_case[batch_size]['manipulation_batch_size'] = batch_size
             graph.enable_debug_mode()
 
             os.makedirs(f"cuda_graphs", exist_ok=True)
-            file_path = f"cuda_graphs/currunt_llama3_8b_bs_{batch_size}_graph.pt"
+            file_path = f"cuda_graphs/currunt_llama3_8b_bs_{batch_size}_graph.dot"
             graph.debug_dump(file_path)
         else:
             graph_batch = -1
@@ -574,7 +583,13 @@ def main(manipulation: bool = False):
                 'attention_mask': mask,
                 'past_key_values': past_key_values,
             }
-
+            test_case[batch_size]['static_outputs'] = static_outputs
+            test_case[batch_size]['static_inputs'] = {
+                'input_ids': static_input_ids,
+                'attention_mask': static_attention_mask,
+                'cache_position': static_cache_position,
+                'past_key_values': static_past_key_values,
+            }
 
     for batch_size, values in test_case.items():
         graph_batch_size = values['graph_batch_size']
@@ -602,10 +617,37 @@ def main(manipulation: bool = False):
             graph = test_case[graph_batch]['graph']
             graph_input_pointer = test_case[graph_batch]['static_inputs']
             graph_output_pointer = test_case[graph_batch]['static_outputs']
+            if manipulation and batch_size != 3:
+                if batch_size != test_case[graph_batch]['manipulation_batch_size']:
+                    try:
+                        file_path = f"cuda_graphs/manipulate_llama3_8b_bs_{graph_batch}_{batch_size}_graph.dot"
+                        raw_capsule = graph.raw_cuda_graph()
+                        ret = cuda_graph_api.manipulation_huggingface_graph(raw_capsule, batch_size, file_path, False)
+                        graph.instantiate()
+                        print(f"Manipulated graph from batch size {graph_batch} to {batch_size}")
+                        print(ret)
+                        test_case[graph_batch]['manipulated'] = True
+                        test_case[graph_batch]['manipulation_batch_size'] = batch_size
+                    except Exception as e:
+                        print(f"Error manipulating graph: {e}")
+
         else:
             graph = values['graph']
             graph_input_pointer = values['static_inputs']
             graph_output_pointer = values['static_outputs']
+
+        # try:
+        #     file_path = f"cuda_graphs/manipulate_llama3_8b_bs_{graph_batch}_5_graph.dot"
+        #     raw_capsule = graph.raw_cuda_graph()
+        #     graph.instantiate()
+        #     ret = cuda_graph_api.manipulation_huggingface_graph(raw_capsule, 5, file_path)
+        #     print(f"Manipulated graph from batch size {graph_batch} to 5")
+        #     print(ret)
+        #     test_case[graph_batch]['manipulated'] = True
+        #     test_case[graph_batch]['manipulation_batch_size'] = batch_size
+
+        # except Exception as e:
+        #     print(f"Error manipulating graph: {e}")
 
         target_batch = graph_input_pointer['input_ids'].shape[0]
         src_batch = values['inputs']['input_ids'].shape[0]
@@ -625,18 +667,18 @@ def main(manipulation: bool = False):
         def monitor_batch_graph():
             torch.cuda.synchronize()
             start_time = time.time()
-            for _ in range(1):
+            for _ in range(600):
                 graph.replay()
             torch.cuda.synchronize()
             end_time = time.time()
             total_time = end_time - start_time
             return _, total_time
 
-        for _ in range(1):
+        for _ in range(32):
             _, during_time = monitor_graph.collect_during_execution(
                 monitor_batch_graph,
                 num_samples = batch_size,
-            )
+            ) 
             monitor_graph.save_statistics_to_csv(during_time=during_time)
         
         output_ids = graph_output_pointer
@@ -650,6 +692,7 @@ def main(manipulation: bool = False):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--manipulation", type=bool, default=False, help="Manipulation Flag")
-    args = parser.parse_args()
-    main(args.manipulation)
+    ## 인자가 있으면 true 없으면 false    
+    # parser.add_argument("--manipulation", type=bool, default=False, help="Manipulation Flag")
+    # args = parser.parse_args()
+    main(True)

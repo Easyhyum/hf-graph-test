@@ -8,4 +8,4 @@ pip install -e '[.torch]'
 pip install datasets
 pip install pynvml
 
-nohup python ./run_batch_inference.py > final_test_v1.log 2>&1 &
+nohup python ./main.py > final_test_v0.log 2>&1 &
