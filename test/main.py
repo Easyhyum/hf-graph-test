@@ -394,7 +394,7 @@ def main(manipulation: bool = False):
         device_map="auto",
         dtype=torch.bfloat16,
         trust_remote_code=True,
-        attn_implementation='eager',
+        attn_implementation='flash_attention_2',
     )
     try:
         model.to(device)
@@ -408,14 +408,14 @@ def main(manipulation: bool = False):
     # batch_list = [4]
     test_case = {}
 
-    # batch_list = [8, 5]
+    batch_list = [8]
     # batch_list = [32,16,8,4,2,1]
-    batch_list = [32]
-    extend_batch_list = [b for b in range(16, 0, -1)]
-    batch_list.extend(extend_batch_list)
+    # batch_list = [32]
+    # extend_batch_list = [b for b in range(16, 0, -1)]
+    # batch_list.extend(extend_batch_list)
 
-    # graph_batch_list = [8]
-    graph_batch_list = [32,16,8,4,2,1]
+    graph_batch_list = [8]
+    # graph_batch_list = [32,16,8,4,2,1]
     # graph_batch_list = [32]
     # extend_batch_list = [b for b in range(16, 0, -1)]
     # graph_batch_list.extend(extend_batch_list)
@@ -667,14 +667,14 @@ def main(manipulation: bool = False):
         def monitor_batch_graph():
             torch.cuda.synchronize()
             start_time = time.time()
-            for _ in range(600):
+            for _ in range(1):
                 graph.replay()
             torch.cuda.synchronize()
             end_time = time.time()
             total_time = end_time - start_time
             return _, total_time
 
-        for _ in range(32):
+        for _ in range(1):
             _, during_time = monitor_graph.collect_during_execution(
                 monitor_batch_graph,
                 num_samples = batch_size,
