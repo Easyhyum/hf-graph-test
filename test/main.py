@@ -476,7 +476,7 @@ def main(manipulation: bool = False):
         prefill_len = inputs["input_ids"].shape[1]
         cache_position = torch.tensor([prefill_len], device=device, dtype=torch.long)
         outputs_idx = None
-        for _ in range(2):
+        for _ in range(2): 
             with torch.no_grad():
                 outputs_idx = model(
                     input_ids=next_token_ids,
