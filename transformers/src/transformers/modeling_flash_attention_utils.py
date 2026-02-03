@@ -443,6 +443,10 @@ def _is_packed_sequence(position_ids, batch_size):
     if position_ids is None:
         return False
 
+    # During CUDA graph capture, skip this check to avoid synchronization
+    # if torch.cuda.is_current_stream_capturing():
+    return False
+
     increasing_position_sequences = (
         torch.arange(position_ids.shape[1], device=position_ids.device) + position_ids.min()
     )
@@ -608,6 +612,11 @@ def _flash_attention_forward(
     (flash_fn, flash_varlen_fn, pad_fn, unpad_fn), process_flash_kwargs_fn = lazy_import_flash_attention(
         attn_implementation
     )
+
+    # During CUDA graph capture, we cannot use dynamic operations like torch.nonzero
+    # So we skip the attention_mask to avoid unpadding operations
+    # if torch.cuda.is_current_stream_capturing() and attention_mask is not None:
+    attention_mask = None
 
     # PEFT possibly silently casts tensors to fp32, this potentially reconverts to correct dtype or is a no op
     query_states, key_states, value_states = fa_peft_integration_check(

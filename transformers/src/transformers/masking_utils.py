@@ -563,8 +563,8 @@ def flash_attention_mask(
         attention_mask = attention_mask[:, -kv_length:]
         # We only return an actual mask if there is at least 1 padding token, otherwise we return `None` and use `is_causal` in FA2
         # (note that the attention_mask is a boolean dtype here)
-        if attention_mask.all():
-            attention_mask = None
+        # if attention_mask.all():
+        #     attention_mask = None
 
     return attention_mask
 
